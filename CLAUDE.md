@@ -4,23 +4,37 @@
 
 Bun CLI tool that captures, researches, scores, and builds Claude-related tools from Grok Tasks daily updates.
 
-**Tech Stack:** Bun, TypeScript, Commander CLI
+**Tech Stack:** Bun, TypeScript, Commander CLI, Puppeteer
 
 ## Quick Start
 
+### Recommended: `/dtu` Skill (Claude in Chrome)
+
+The easiest way to run the pipeline - uses Claude in Chrome extension to capture from an already-open Grok Tasks tab (bypasses CAPTCHA):
+
+```
+/dtu
+```
+
+Requires: Grok Tasks open in Brave browser + Claude in Chrome extension connected.
+
+### Alternative: `dtu` Global CLI
+
 ```bash
-# Install dependencies
+# Link the CLI globally (one-time setup)
+cd /Users/bhal/Downloads/claude/daily-tool-updates && bun link
+
+# Run from anywhere
+dtu daily --clipboard    # Full pipeline with manual paste
+dtu capture              # Just capture
+dtu report               # Just regenerate report
+```
+
+### Manual Steps
+
+```bash
 bun install
-
-# Run full daily pipeline (with manual clipboard input)
 bun run daily --clipboard
-
-# Or run individual steps
-bun run capture --clipboard
-bun run parse
-bun run research
-bun run score
-bun run report
 ```
 
 ## Project Structure
@@ -76,9 +90,40 @@ Capture → Parse → Research → Score → Report
 
 ## Environment Variables
 
-| Variable       | Description                                       |
-| -------------- | ------------------------------------------------- |
-| `GITHUB_TOKEN` | Optional: GitHub API token for higher rate limits |
+| Variable       | Description                                           |
+| -------------- | ----------------------------------------------------- |
+| `GITHUB_TOKEN` | Optional: GitHub API token for higher rate limits     |
+| `BROWSER_PATH` | Optional: Path to browser executable (default: Brave) |
+
+## Daily Automation (launchd)
+
+Automated daily runs at 7pm via macOS LaunchAgent:
+
+```bash
+# Install schedule
+./scripts/install-schedule.sh
+
+# Check status
+launchctl list | grep dailytoolsupdates
+
+# Manual run
+./scripts/daily-run.sh
+
+# View logs
+cat logs/$(date +%Y-%m-%d).log
+
+# Uninstall
+launchctl unload ~/Library/LaunchAgents/com.dailytoolsupdates.plist
+```
+
+Note: Browser automation (Puppeteer) gets blocked by CAPTCHA. Use `/dtu` skill or `--clipboard` flag instead.
+
+## Security Notes
+
+- **Build command**: Validates install commands against whitelist patterns before execution
+- **Date validation**: Prevents path traversal via date parameter
+- **Safe patterns**: Only npm/bun/yarn/pip/docker/git commands with validated syntax are auto-executed
+- **Unsafe commands**: Require manual confirmation before running
 
 ## Bun Conventions
 
