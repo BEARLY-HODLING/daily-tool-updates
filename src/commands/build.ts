@@ -63,33 +63,59 @@ export async function buildCommand(options: BuildOptions): Promise<void> {
 
     // Determine install method
     if (research.tool.installCommand) {
-      const installSpinner = ora("Installing...").start();
+      const cmd = research.tool.installCommand;
 
-      try {
-        // Parse the install command
-        const cmd = research.tool.installCommand;
+      // Security: Validate install command against safe patterns
+      const safePatterns = [
+        /^npm\s+i(nstall)?\s+(-g\s+)?[\w@\-\/\.]+$/i,
+        /^bun\s+(add|install)\s+(-g\s+)?[\w@\-\/\.]+$/i,
+        /^yarn\s+add\s+(-g\s+)?[\w@\-\/\.]+$/i,
+        /^pip\s+install\s+[\w\-\.]+$/i,
+        /^docker\s+pull\s+[\w\-\.\/\:]+$/i,
+        /^git\s+clone\s+https?:\/\/[\w\-\.\/]+$/i,
+      ];
 
-        // Run in sandbox
-        const proc = Bun.spawn(["sh", "-c", cmd], {
-          cwd: toolSandbox,
-          stdout: "pipe",
-          stderr: "pipe",
-        });
+      const isSafeCommand = safePatterns.some((pattern) => pattern.test(cmd));
 
-        const exitCode = await proc.exited;
-
-        if (exitCode === 0) {
-          installSpinner.succeed("Installed successfully");
-        } else {
-          const stderr = await new Response(proc.stderr).text();
-          installSpinner.fail(`Install failed (exit code ${exitCode})`);
-          console.log(chalk.red(stderr));
-        }
-      } catch (error) {
-        installSpinner.fail("Install failed");
+      if (!isSafeCommand) {
         console.log(
-          chalk.red(error instanceof Error ? error.message : String(error)),
+          chalk.yellow(`\n⚠️  Install command requires confirmation:`),
         );
+        console.log(chalk.white(`    ${cmd}`));
+        console.log(
+          chalk.gray(`\n  This command doesn't match safe patterns.`),
+        );
+        console.log(chalk.gray(`  Run manually in: ${toolSandbox}`));
+      } else {
+        const installSpinner = ora("Installing...").start();
+
+        try {
+          // Parse safe command into arguments (avoid shell interpretation)
+          const args = cmd.split(/\s+/);
+          const executable = args[0];
+          const execArgs = args.slice(1);
+
+          const proc = Bun.spawn([executable, ...execArgs], {
+            cwd: toolSandbox,
+            stdout: "pipe",
+            stderr: "pipe",
+          });
+
+          const exitCode = await proc.exited;
+
+          if (exitCode === 0) {
+            installSpinner.succeed("Installed successfully");
+          } else {
+            const stderr = await new Response(proc.stderr).text();
+            installSpinner.fail(`Install failed (exit code ${exitCode})`);
+            console.log(chalk.red(stderr));
+          }
+        } catch (error) {
+          installSpinner.fail("Install failed");
+          console.log(
+            chalk.red(error instanceof Error ? error.message : String(error)),
+          );
+        }
       }
     } else if (research.github) {
       // Clone from GitHub

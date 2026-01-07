@@ -3,7 +3,8 @@
  *
  * Supports:
  * - --clipboard: Manual paste from clipboard
- * - --browser: Automated browser capture (default)
+ * - --login: Interactive browser login (saves cookies)
+ * - default: Automated headless browser capture
  */
 
 import chalk from "chalk";
@@ -16,9 +17,16 @@ import type { DailyUpdate } from "../models/types";
 const DATA_DIR = join(import.meta.dir, "../../data");
 const COOKIES_PATH = join(DATA_DIR, ".grok-cookies.json");
 
+// Browser executable path - configurable via env var
+const BROWSER_PATH =
+  process.env.BROWSER_PATH ||
+  "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser";
+
+// Date format validation
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
 interface CaptureOptions {
   clipboard?: boolean;
-  browser?: boolean;
   login?: boolean;
   date: string;
 }
@@ -28,6 +36,16 @@ export async function captureCommand(options: CaptureOptions): Promise<void> {
 
   try {
     const { clipboard, login, date } = options;
+
+    // Validate date format to prevent path traversal
+    if (!DATE_PATTERN.test(date)) {
+      spinner.fail(`Invalid date format: ${date}`);
+      console.log(
+        chalk.yellow("  Expected format: YYYY-MM-DD (e.g., 2026-01-07)"),
+      );
+      return;
+    }
+
     let content: string;
 
     if (login) {
@@ -87,11 +105,11 @@ async function captureFromBrowser(
 ): Promise<string> {
   const puppeteer = await import("puppeteer");
 
-  // Launch Brave browser (headless unless interactive login mode)
+  // Launch browser (headless unless interactive login mode)
+  // Browser path configurable via BROWSER_PATH env var
   const browser = await puppeteer.default.launch({
     headless: !interactive,
-    executablePath:
-      "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+    executablePath: BROWSER_PATH,
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
     defaultViewport: interactive ? null : { width: 1280, height: 800 },
   });
