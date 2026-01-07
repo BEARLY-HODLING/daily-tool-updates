@@ -87,25 +87,27 @@ async function captureFromBrowser(
 ): Promise<string> {
   const puppeteer = await import("puppeteer");
 
-  // Launch browser (headless unless interactive login mode)
+  // Launch Brave browser (headless unless interactive login mode)
   const browser = await puppeteer.default.launch({
     headless: !interactive,
+    executablePath:
+      "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
     defaultViewport: interactive ? null : { width: 1280, height: 800 },
   });
 
   if (interactive) {
-    spinner.info("Browser opened - please login to your X account");
+    spinner.info("Browser opened - complete any verification and login");
     console.log(
-      chalk.yellow(
-        "\n  After logging in, the page will navigate to Grok Tasks.",
-      ),
+      chalk.yellow("\n  1. Complete any CAPTCHA/security verification"),
+    );
+    console.log(chalk.yellow("  2. Login to your X account if prompted"));
+    console.log(chalk.yellow("  3. Navigate to your Grok Tasks page"));
+    console.log(
+      chalk.yellow("  4. Wait for content to load, then it will auto-capture"),
     );
     console.log(
-      chalk.yellow("  Cookies will be saved automatically for future runs."),
-    );
-    console.log(
-      chalk.gray("  Close the browser when done, or wait for auto-capture.\n"),
+      chalk.gray("\n  Cookies will be saved automatically for future runs.\n"),
     );
   }
 
@@ -140,37 +142,56 @@ async function captureFromBrowser(
     spinner.text = "Waiting for content...";
     await page.waitForSelector("body", { timeout: 10000 });
 
-    // Check if we need to login
-    const currentUrl = page.url();
-    if (currentUrl.includes("login") || currentUrl.includes("auth")) {
-      if (interactive) {
-        // Wait for user to login manually
-        spinner.info("Waiting for login... (complete login in browser)");
+    if (interactive) {
+      // In interactive mode, wait for user to complete verification/login
+      // and for page to contain actual Claude content
+      spinner.text =
+        "Waiting for you to complete verification and navigate to tasks...";
 
-        // Wait up to 5 minutes for login
-        const maxWait = 5 * 60 * 1000;
-        const startTime = Date.now();
+      const maxWait = 10 * 60 * 1000; // 10 minutes
+      const startTime = Date.now();
+      let foundContent = false;
 
-        while (Date.now() - startTime < maxWait) {
-          await new Promise((r) => setTimeout(r, 2000));
-          const url = page.url();
-          if (!url.includes("login") && !url.includes("auth")) {
-            spinner.succeed("Login successful!");
-            break;
-          }
+      while (Date.now() - startTime < maxWait && !foundContent) {
+        await new Promise((r) => setTimeout(r, 3000));
+
+        // Check if page has Claude-related content
+        const pageContent = await page.evaluate(
+          () => document.body.innerText || "",
+        );
+        if (
+          pageContent.includes("Daily Claude") ||
+          (pageContent.includes("Tool") && pageContent.includes("Install")) ||
+          (pageContent.includes("Grok Tasks") && pageContent.length > 1000)
+        ) {
+          foundContent = true;
+          spinner.succeed("Found content!");
+        } else {
+          const elapsed = Math.round((Date.now() - startTime) / 1000);
+          spinner.text = `Waiting for Claude content... (${elapsed}s) - complete verification in browser`;
         }
+      }
 
-        // Re-navigate to tasks after login
-        spinner.text = "Navigating to Grok Tasks...";
-        await page.goto("https://grok.com/tasks", {
-          waitUntil: "networkidle2",
-          timeout: 30000,
-        });
-      } else {
-        spinner.warn("Login required for Grok Tasks");
+      if (!foundContent) {
+        spinner.warn("Timed out waiting for content");
+        console.log(
+          chalk.yellow("\n  Try navigating to your Grok Tasks page manually."),
+        );
+      }
+    } else {
+      // Headless mode - check for login requirement
+      const currentUrl = page.url();
+      if (
+        currentUrl.includes("login") ||
+        currentUrl.includes("auth") ||
+        currentUrl.includes("challenge")
+      ) {
+        spinner.warn("Login/verification required for Grok Tasks");
         console.log(chalk.yellow("\n  To set up automated capture:"));
         console.log(chalk.gray("  1. Run: bun run capture --login"));
-        console.log(chalk.gray("  2. Login to your X account in the browser"));
+        console.log(
+          chalk.gray("  2. Complete verification and login in browser"),
+        );
         console.log(chalk.gray("  3. Cookies will be saved for future runs"));
         console.log(chalk.yellow("\n  For now, use clipboard mode:"));
         console.log(chalk.gray("  bun run capture --clipboard"));
