@@ -30,6 +30,10 @@ program
   .command("capture")
   .description("Capture today's update from Grok Tasks")
   .option("-c, --clipboard", "Capture from clipboard (manual paste)")
+  .option(
+    "-l, --login",
+    "Open browser for login (saves cookies for automation)",
+  )
   .option("-d, --date <date>", "Specify date (YYYY-MM-DD)", getTodayDate())
   .action(captureCommand);
 

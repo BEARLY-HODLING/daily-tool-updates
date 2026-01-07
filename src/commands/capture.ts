@@ -1,5 +1,9 @@
 /**
  * Capture command - Get daily update from Grok Tasks
+ *
+ * Supports:
+ * - --clipboard: Manual paste from clipboard
+ * - --browser: Automated browser capture (default)
  */
 
 import chalk from "chalk";
@@ -10,9 +14,12 @@ import { join } from "path";
 import type { DailyUpdate } from "../models/types";
 
 const DATA_DIR = join(import.meta.dir, "../../data");
+const COOKIES_PATH = join(DATA_DIR, ".grok-cookies.json");
 
 interface CaptureOptions {
   clipboard?: boolean;
+  browser?: boolean;
+  login?: boolean;
   date: string;
 }
 
@@ -20,24 +27,21 @@ export async function captureCommand(options: CaptureOptions): Promise<void> {
   const spinner = ora("Capturing daily update...").start();
 
   try {
-    const { clipboard, date } = options;
+    const { clipboard, login, date } = options;
     let content: string;
 
-    if (clipboard) {
+    if (login) {
+      // Interactive login mode - opens visible browser
+      spinner.text = "Opening browser for login...";
+      content = await captureFromBrowser(spinner, true);
+    } else if (clipboard) {
       // Read from clipboard (user pasted content)
       spinner.text = "Reading from clipboard...";
       content = await readFromClipboard();
     } else {
-      // TODO: Browser automation with Puppeteer
-      spinner.fail("Browser automation not yet implemented");
-      console.log(
-        chalk.yellow("\nUse --clipboard flag to paste content manually:"),
-      );
-      console.log(chalk.gray("  bun run capture --clipboard"));
-      console.log(
-        chalk.gray("\nThen paste your Grok Tasks content when prompted."),
-      );
-      return;
+      // Browser automation with Puppeteer (headless)
+      spinner.text = "Launching browser...";
+      content = await captureFromBrowser(spinner, false);
     }
 
     if (!content || content.trim().length === 0) {
@@ -69,6 +73,167 @@ export async function captureCommand(options: CaptureOptions): Promise<void> {
     console.error(
       chalk.red(error instanceof Error ? error.message : String(error)),
     );
+  }
+}
+
+/**
+ * Capture from Grok Tasks using Puppeteer browser automation
+ * @param spinner - ora spinner instance
+ * @param interactive - if true, opens visible browser for login
+ */
+async function captureFromBrowser(
+  spinner: ReturnType<typeof ora>,
+  interactive: boolean = false,
+): Promise<string> {
+  const puppeteer = await import("puppeteer");
+
+  // Launch browser (headless unless interactive login mode)
+  const browser = await puppeteer.default.launch({
+    headless: !interactive,
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    defaultViewport: interactive ? null : { width: 1280, height: 800 },
+  });
+
+  if (interactive) {
+    spinner.info("Browser opened - please login to your X account");
+    console.log(
+      chalk.yellow(
+        "\n  After logging in, the page will navigate to Grok Tasks.",
+      ),
+    );
+    console.log(
+      chalk.yellow("  Cookies will be saved automatically for future runs."),
+    );
+    console.log(
+      chalk.gray("  Close the browser when done, or wait for auto-capture.\n"),
+    );
+  }
+
+  try {
+    const page = await browser.newPage();
+
+    // Set viewport
+    await page.setViewport({ width: 1280, height: 800 });
+
+    // Load cookies if they exist (for authentication)
+    if (existsSync(COOKIES_PATH)) {
+      spinner.text = "Loading saved cookies...";
+      try {
+        const cookiesJson = await readFile(COOKIES_PATH, "utf-8");
+        const cookies = JSON.parse(cookiesJson);
+        await page.setCookie(...cookies);
+      } catch (e) {
+        console.log(
+          chalk.yellow("  Could not load cookies, may need to login"),
+        );
+      }
+    }
+
+    // Navigate to Grok Tasks
+    spinner.text = "Navigating to Grok Tasks...";
+    await page.goto("https://grok.com/tasks", {
+      waitUntil: "networkidle2",
+      timeout: 30000,
+    });
+
+    // Wait for content to load
+    spinner.text = "Waiting for content...";
+    await page.waitForSelector("body", { timeout: 10000 });
+
+    // Check if we need to login
+    const currentUrl = page.url();
+    if (currentUrl.includes("login") || currentUrl.includes("auth")) {
+      if (interactive) {
+        // Wait for user to login manually
+        spinner.info("Waiting for login... (complete login in browser)");
+
+        // Wait up to 5 minutes for login
+        const maxWait = 5 * 60 * 1000;
+        const startTime = Date.now();
+
+        while (Date.now() - startTime < maxWait) {
+          await new Promise((r) => setTimeout(r, 2000));
+          const url = page.url();
+          if (!url.includes("login") && !url.includes("auth")) {
+            spinner.succeed("Login successful!");
+            break;
+          }
+        }
+
+        // Re-navigate to tasks after login
+        spinner.text = "Navigating to Grok Tasks...";
+        await page.goto("https://grok.com/tasks", {
+          waitUntil: "networkidle2",
+          timeout: 30000,
+        });
+      } else {
+        spinner.warn("Login required for Grok Tasks");
+        console.log(chalk.yellow("\n  To set up automated capture:"));
+        console.log(chalk.gray("  1. Run: bun run capture --login"));
+        console.log(chalk.gray("  2. Login to your X account in the browser"));
+        console.log(chalk.gray("  3. Cookies will be saved for future runs"));
+        console.log(chalk.yellow("\n  For now, use clipboard mode:"));
+        console.log(chalk.gray("  bun run capture --clipboard"));
+        await browser.close();
+        return "";
+      }
+    }
+
+    // Try to find and click on the daily Claude update task
+    spinner.text = "Looking for daily update task...";
+
+    // Wait for task list to appear
+    await page.waitForSelector('[role="main"], main, .task-list, article', {
+      timeout: 10000,
+    });
+
+    // Look for the Claude update task and extract content
+    const content = await page.evaluate(() => {
+      // Try multiple selectors to find the update content
+      const selectors = [
+        // Task content area
+        '[data-testid="task-content"]',
+        ".task-content",
+        "article",
+        '[role="article"]',
+        // Main content area
+        "main",
+        '[role="main"]',
+        // Fallback to body
+        "body",
+      ];
+
+      for (const selector of selectors) {
+        const element = document.querySelector(selector);
+        if (element) {
+          // Get text content, clean it up
+          const text = element.innerText || element.textContent || "";
+          // Only return if it looks like a Claude update
+          if (
+            text.includes("Claude") ||
+            text.includes("Tool") ||
+            text.includes("Daily")
+          ) {
+            return text.trim();
+          }
+        }
+      }
+
+      // Fallback: get all visible text
+      return document.body.innerText || "";
+    });
+
+    // Save cookies for next time
+    spinner.text = "Saving cookies...";
+    const cookies = await page.cookies();
+    await mkdir(DATA_DIR, { recursive: true });
+    await writeFile(COOKIES_PATH, JSON.stringify(cookies, null, 2));
+
+    await browser.close();
+    return content;
+  } catch (error) {
+    await browser.close();
+    throw error;
   }
 }
 

@@ -6,12 +6,14 @@ CLI tool that captures, researches, scores, and builds Claude-related tools from
 
 Every day, Grok Tasks generates a summary of new Claude/AI coding tools from X posts and web sources. This CLI helps you:
 
-1. **Capture** - Save the daily update from clipboard
+1. **Capture** - Automatically fetch or manually paste the daily update
 2. **Parse** - Extract individual tools from the markdown
 3. **Research** - Fetch GitHub stats (stars, forks, activity) and npm data
 4. **Score** - Evaluate tools using a weighted algorithm
 5. **Report** - Generate a summary with BUILD/WATCH/SKIP recommendations
 6. **Build** - Test high-potential tools in a sandbox
+
+Supports **fully automated daily runs** via macOS launchd scheduling.
 
 ## Installation
 
@@ -68,6 +70,53 @@ bun run parse --date 2026-01-07
 # Research a specific tool only
 bun run research --tool aider
 ```
+
+## Automated Daily Runs
+
+### Setup Authentication (One-time)
+
+Before automated runs can work, you need to authenticate with Grok:
+
+```bash
+# Opens browser for X login - cookies saved for future runs
+bun run capture --login
+```
+
+Login to your X account in the browser window. Cookies are saved to `data/.grok-cookies.json`.
+
+### Install Daily Schedule (7 PM)
+
+```bash
+# Install launchd schedule to run daily at 7:00 PM
+./scripts/install-schedule.sh
+```
+
+This creates a macOS LaunchAgent that runs the full pipeline automatically.
+
+### Schedule Management
+
+```bash
+# Check if schedule is running
+launchctl list | grep dailytoolsupdates
+
+# Run manually
+./scripts/daily-run.sh
+
+# View today's logs
+cat logs/$(date +%Y-%m-%d).log
+
+# Uninstall schedule
+launchctl unload ~/Library/LaunchAgents/com.dailytoolsupdates.plist
+rm ~/Library/LaunchAgents/com.dailytoolsupdates.plist
+```
+
+### How Automation Works
+
+1. **Browser Automation**: Puppeteer navigates to grok.com/tasks
+2. **Cookie Auth**: Saved cookies authenticate automatically
+3. **Content Extraction**: Extracts the daily Claude tools update
+4. **Full Pipeline**: Parses, researches, scores, and generates report
+5. **Notifications**: macOS notifications on success/failure
 
 ## Scoring Algorithm
 
@@ -149,7 +198,7 @@ daily-tool-updates/
 ├── src/
 │   ├── index.ts           # CLI entry point
 │   ├── commands/          # CLI commands
-│   │   ├── capture.ts
+│   │   ├── capture.ts     # Browser automation + clipboard
 │   │   ├── parse.ts
 │   │   ├── research.ts
 │   │   ├── score.ts
@@ -161,7 +210,12 @@ daily-tool-updates/
 │   │   └── npm.ts
 │   └── models/
 │       └── types.ts       # TypeScript interfaces
+├── scripts/
+│   ├── daily-run.sh       # Automation runner script
+│   ├── install-schedule.sh # Schedule installer
+│   └── com.dailytoolsupdates.plist # launchd config
 ├── data/                  # Generated data (git-ignored)
+├── logs/                  # Automation logs (git-ignored)
 └── sandbox/               # Tool testing area (git-ignored)
 ```
 
