@@ -187,9 +187,18 @@ data/
 
 ## Environment Variables
 
-| Variable       | Description                                       |
-| -------------- | ------------------------------------------------- |
-| `GITHUB_TOKEN` | Optional: GitHub API token for higher rate limits |
+| Variable       | Description                                           |
+| -------------- | ----------------------------------------------------- |
+| `GITHUB_TOKEN` | Optional: GitHub API token for higher rate limits     |
+| `BROWSER_PATH` | Optional: Path to browser executable (default: Brave) |
+
+Default browser path: `/Applications/Brave Browser.app/Contents/MacOS/Brave Browser`
+
+To use a different browser:
+
+```bash
+export BROWSER_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+```
 
 ## Project Structure
 
